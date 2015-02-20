@@ -1,0 +1,2 @@
+inih: New BSD License
+RPLMaster: GPLv3 (http://www.gnu.org/copyleft/gpl.html)
