@@ -172,6 +172,8 @@ int ParseConfig(void *user, const char *section, const char *name, const char *v
 			cfg->maxpacketsip = atoi(value);
 		} else if (!strcmp(name, "backupfile")) {
 			cfg->backupfile = atoi(value);
+		} else if (!strcmp(name, "stef")) {
+			cfg->stef = atoi(value);
 		}
 	} else if (!strncmp(section, "SourceMaster", 12)) {
 		int srvNum = atoi(section + 12);
@@ -245,8 +247,12 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			struct sockaddr_in addr;
 			srv_t *srv = NULL;
 
-			// at least 4B for the ip and 2B for the port should be left
-			if (len - scanpos - 1 < 6) {
+			if (conf.stef && len - scanpos - 1 < 12) {
+				// STEF: at least 8B for the ip and 4B for the port should be left
+				break;
+			}
+			else if (len - scanpos - 1 < 6) {
+				// at least 4B for the ip and 2B for the port should be left
 				break;
 			}
 
@@ -256,6 +262,16 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			}
 
 			addr.sin_family = AF_INET;
+
+			if (conf.stef) {
+				// STEF has ips and ports encoded in hex, so we parse the values here and store them in the same format
+				// used by ioq3, jk2, ...
+				char hexValue[3] = { 0 };
+				for ( i = 0; i < 6; i++ ) {
+					memcpy( hexValue, &data[scanpos+1+(i*2)], 2 );
+					data[scanpos+1+i] = (unsigned char)strtoul( hexValue, NULL, 16 );
+				}
+			}
 
 			addr.sin_addr.s_addr = *(uint32_t *)(&data[scanpos + 1]);
 			addr.sin_port = *(uint16_t *)(&data[scanpos + 5]);
@@ -292,18 +308,30 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			}
 
 			numServers++;
-			scanpos += 7; // 4B (IP) + 2B (Port) + 1B (\)
+			if (conf.stef) scanpos += 13; // 8B (IP) + 4B (Port) + 1B (\)
+			else scanpos += 7; // 4B (IP) + 2B (Port) + 1B (\)
 		}
 
 		println(MSG_DEBUG, "parsed %i servers from %s", numServers, srcmaster->host);
-	} else if (!strncmp(cmd, "infoResponse\n", sizeof("infoResponse\n") - 1)) {
+	} else if ( (conf.stef == 1 && !strcmp(cmd, "infoResponse")) ||
+	            (!strncmp(cmd, "infoResponse\n", sizeof("infoResponse\n") - 1)) ) {
 		int i;
 
 		for (i = 0; i < MAX_SERVERS; i++) {
 			if (servers[i].state != STATE_UNUSED && !addrcmp(&servers[i].addr, from)) {
+				char *info = data + sizeof("\xFF\xFF\xFF\xFFinfoResponse\n") - 1; // STEF has a space, so it's okay
 				int protocol;
 
-				protocol = atoi(Info_ValueForKey(data + sizeof("\xFF\xFF\xFF\xFFinfoResponse\n") - 1, "protocol"));
+				if ( conf.stef == 1 ) {
+					// STEF has its InfoString surrounded by '"' to be used with Cmd_* functions, so just cut it away
+					while ( *info && *info == '"' || *info == ' ' )
+						info++;
+
+					if ( info[strlen(info)-1] == '"' )
+						info[strlen(info)-1] = 0;
+				}
+
+				protocol = atoi(Info_ValueForKey(info, "protocol"));
 				if (protocol <= 0) {
 					println(MSG_DEBUG, "invalid infoResponse from %s", addrstr(from));
 					return;
@@ -320,7 +348,8 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			}
 		}
 	} else if (!strcmp(cmd, "getservers")) {
-		byte resp[sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n") + MAX_SERVERS_PER_PACKET * 7 + 4];
+		//byte resp[sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n") + MAX_SERVERS_PER_PACKET * 7 + 4];
+		byte resp[sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n") + MAX_SERVERS_PER_PACKET * 13 + 4 ];
 		int resplen;
 		int protocol;
 		int i, numsrvsresp = 0, numsrvs = 0;
@@ -331,8 +360,12 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			return;
 		}
 
-		strcpy(resp, "\xFF\xFF\xFF\xFFgetserversResponse\n");
-		resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n");
+		if (conf.stef == 1) {
+			strcpy(resp, "\xFF\xFF\xFF\xFFgetserversResponse");
+		} else {
+			strcpy(resp, "\xFF\xFF\xFF\xFFgetserversResponse\n");
+		}
+		resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse") + 1;
 		for (i = 0; i < MAX_SERVERS; i++) {
 			if (servers[i].state != STATE_ACTIVE || servers[i].protocol != protocol) {
 				continue;
@@ -346,19 +379,26 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			// send out data and prepare another packet
 			if (numsrvsresp >= MAX_SERVERS_PER_PACKET) {
 				resp[resplen++] = (byte)'\\';
-				resp[resplen++] = 'E'; resp[resplen++] = 'O'; resp[resplen++] = 'T';
+				resp[resplen++] = 'E'; resp[resplen++] = 'O';
+				if (conf.stef) resp[resplen++] = 'F';
+				else resp[resplen++] = 'T';
 				sendto(sock, (const char *)resp, resplen, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 
 				numsrvsresp = 0;
-				resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n");
+				resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse") + 1;
 			}
 
 			resp[resplen++] = (byte)'\\';
 
-			*(uint32_t *)(&resp[resplen]) = (uint32_t)servers[i].addr.sin_addr.s_addr;
-			*(uint16_t *)(&resp[resplen + 4]) = (uint16_t)servers[i].addr.sin_port;
+			if (conf.stef) {
+				sprintf(&resp[resplen], "%x%x", ntohl(servers[i].addr.sin_addr.s_addr), ntohs(servers[i].addr.sin_port));
+			} else {
+				*(uint32_t *)(&resp[resplen]) = (uint32_t)servers[i].addr.sin_addr.s_addr;
+				*(uint16_t *)(&resp[resplen + 4]) = (uint16_t)servers[i].addr.sin_port;
+			}
 
-			resplen += 6; // 4B (IP) + 2B (Port)
+			if (conf.stef) resplen += 12; // 8B (IP) + 2B (Port)
+			else resplen += 6; // 4B (IP) + 2B (Port)
 			numsrvsresp++, numsrvs++;
 		}
 
@@ -462,7 +502,11 @@ void TimerEvent() {
 			}
 
 			println(MSG_DEBUG, "requesting servers from %s protocol %i...", conf.srcmasters[i].host, conf.srcmasters[i].protocols[j]);
-			sprintf(req, "\xFF\xFF\xFF\xFFgetservers %i", conf.srcmasters[i].protocols[j]);
+			if ( conf.stef ) {
+				sprintf(req, "\xFF\xFF\xFF\xFFgetservers %i empty full", conf.srcmasters[i].protocols[j]);
+			} else {
+				sprintf(req, "\xFF\xFF\xFF\xFFgetservers %i", conf.srcmasters[i].protocols[j]);
+			}
 			sendto(sock, req, (int)strlen(req), 0, (const struct sockaddr *)&conf.srcmasters[i].addr, sizeof(conf.srcmasters[i].addr));
 		}
 	}

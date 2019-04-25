@@ -99,6 +99,7 @@ typedef struct {
 	int maxserversip;
 	int maxpacketsip;
 	int backupfile;
+	int stef;
 	srcmaster_t srcmasters[MAX_SOURCE_MASTERS];
 } conf_t;
 
