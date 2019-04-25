@@ -204,8 +204,8 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 
 	data[len] = 0;
 
-	// check for ÿÿÿÿ
-	if (!(len > 4) || memcmp(data, "ÿÿÿÿ", 4)) {
+	// check for \xFF\xFF\xFF\xFF
+	if (!(len > 4) || memcmp(data, "\xFF\xFF\xFF\xFF", 4)) {
 		return;
 	}
 
@@ -231,7 +231,7 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			return;
 		}
 
-		// 24B (ÿÿÿÿgetserversResponse\n\x00) + 1B '\' + 3B (EO(T|F))
+		// 24B (\xFF\xFF\xFF\xFFgetserversResponse\n\x00) + 1B '\' + 3B (EO(T|F))
 		if (len <= sizeof("getserversResponse\n") + 1 + 3) {
 			return;
 		}
@@ -256,6 +256,7 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			}
 
 			addr.sin_family = AF_INET;
+
 			addr.sin_addr.s_addr = *(uint32_t *)(&data[scanpos + 1]);
 			addr.sin_port = *(uint16_t *)(&data[scanpos + 5]);
 
@@ -302,7 +303,7 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			if (servers[i].state != STATE_UNUSED && !addrcmp(&servers[i].addr, from)) {
 				int protocol;
 
-				protocol = atoi(Info_ValueForKey(data + sizeof("ÿÿÿÿinfoResponse\n") - 1, "protocol"));
+				protocol = atoi(Info_ValueForKey(data + sizeof("\xFF\xFF\xFF\xFFinfoResponse\n") - 1, "protocol"));
 				if (protocol <= 0) {
 					println(MSG_DEBUG, "invalid infoResponse from %s", addrstr(from));
 					return;
@@ -319,7 +320,7 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			}
 		}
 	} else if (!strcmp(cmd, "getservers")) {
-		byte resp[sizeof("ÿÿÿÿgetserversResponse\n") + MAX_SERVERS_PER_PACKET * 7 + 4];
+		byte resp[sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n") + MAX_SERVERS_PER_PACKET * 7 + 4];
 		int resplen;
 		int protocol;
 		int i, numsrvsresp = 0, numsrvs = 0;
@@ -330,8 +331,8 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			return;
 		}
 
-		strcpy(resp, "ÿÿÿÿgetserversResponse\n");
-		resplen = sizeof("ÿÿÿÿgetserversResponse\n");
+		strcpy(resp, "\xFF\xFF\xFF\xFFgetserversResponse\n");
+		resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n");
 		for (i = 0; i < MAX_SERVERS; i++) {
 			if (servers[i].state != STATE_ACTIVE || servers[i].protocol != protocol) {
 				continue;
@@ -349,10 +350,11 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 				sendto(sock, (const char *)resp, resplen, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 
 				numsrvsresp = 0;
-				resplen = sizeof("ÿÿÿÿgetserversResponse\n");
+				resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n");
 			}
 
 			resp[resplen++] = (byte)'\\';
+
 			*(uint32_t *)(&resp[resplen]) = (uint32_t)servers[i].addr.sin_addr.s_addr;
 			*(uint16_t *)(&resp[resplen + 4]) = (uint16_t)servers[i].addr.sin_port;
 
@@ -460,7 +462,7 @@ void TimerEvent() {
 			}
 
 			println(MSG_DEBUG, "requesting servers from %s protocol %i...", conf.srcmasters[i].host, conf.srcmasters[i].protocols[j]);
-			sprintf(req, "ÿÿÿÿgetservers %i", conf.srcmasters[i].protocols[j]);
+			sprintf(req, "\xFF\xFF\xFF\xFFgetservers %i", conf.srcmasters[i].protocols[j]);
 			sendto(sock, req, (int)strlen(req), 0, (const struct sockaddr *)&conf.srcmasters[i].addr, sizeof(conf.srcmasters[i].addr));
 		}
 	}
@@ -484,7 +486,7 @@ void TimerEvent() {
 
 		if (servers[i].nextReq <= time(0)) {
 			println(MSG_DEBUG, "requesting info from %s...", addrstr(&servers[i].addr));
-			sendto(sock, "ÿÿÿÿgetinfo", sizeof("ÿÿÿÿgetinfo"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
+			sendto(sock, "\xFF\xFF\xFF\xFFgetinfo", sizeof("\xFF\xFF\xFF\xFFgetinfo"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
 			servers[i].nextReq = time(0) + conf.request;
 		}
 	}
