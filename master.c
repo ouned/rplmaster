@@ -174,6 +174,8 @@ int ParseConfig(void *user, const char *section, const char *name, const char *v
 			cfg->backupfile = atoi(value);
 		} else if (!strcmp(name, "stef")) {
 			cfg->stef = atoi(value);
+		} else if (!strcmp(name, "q2")) {
+			cfg->q2 = atoi(value);
 		}
 	} else if (!strncmp(section, "SourceMaster", 12)) {
 		int srvNum = atoi(section + 12);
@@ -181,7 +183,7 @@ int ParseConfig(void *user, const char *section, const char *name, const char *v
 		if (!strcmp(name, "active")) {
 			cfg->srcmasters[srvNum].active = atoi(value);
 		} else if (!strcmp(name, "host")) {
-			strcpy(cfg->srcmasters[srvNum].host, value);
+			strncpy(cfg->srcmasters[srvNum].host, value, sizeof(cfg->srcmasters[0].host)-1);
 		} else if (!strcmp(name, "port")) {
 			cfg->srcmasters[srvNum].port = atoi(value);
 		} else if (!strcmp(name, "protocols")) {
@@ -195,6 +197,8 @@ int ParseConfig(void *user, const char *section, const char *name, const char *v
 			cfg->srcmasters[srvNum].protocols[num] = atoi(value);
 		} else if (!strcmp(name, "interval")) {
 			cfg->srcmasters[srvNum].interval = atoi(value);
+		} else if (!strcmp(name, "getserversKeywords")) {
+			strncpy(cfg->srcmasters[srvNum].getserversKeywords, value, sizeof(cfg->srcmasters[srvNum].getserversKeywords)-1);
 		}
 	}
 
@@ -211,6 +215,7 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 		return;
 	}
 
+	*cmd = 0; *arg1 = 0; *arg2 = 0; // Valgrind detects unconditional jumps for strncmp on optimized builds (gcc and clang)
 	TokenizeCommandline((const char *)data + 4, cmd, sizeof(cmd), arg1, sizeof(arg1), arg2, sizeof(arg2), NULL);
 
 	// only "getserversResponse" because dpmaster returns bad data
@@ -319,16 +324,20 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 
 		for (i = 0; i < MAX_SERVERS; i++) {
 			if (servers[i].state != STATE_UNUSED && !addrcmp(&servers[i].addr, from)) {
-				char *info = data + sizeof("\xFF\xFF\xFF\xFFinfoResponse\n") - 1; // STEF has a space, so it's okay
+				char *info = data + sizeof("\xFF\xFF\xFF\xFFinfoResponse") - 1;
 				int protocol;
+
+				while ( *info && *info <= ' ' ) // Skip any amount of whitespace, just like the TokenizeString function of the game would
+					info++;
 
 				if ( conf.stef == 1 ) {
 					// STEF has its InfoString surrounded by '"' to be used with Cmd_* functions, so just cut it away
-					while ( *info && *info == '"' || *info == ' ' )
+					char *end = &info[strlen(info)-1];
+					while ( *info == '"' )
 						info++;
 
-					if ( info[strlen(info)-1] == '"' )
-						info[strlen(info)-1] = 0;
+					while ( end > info && *end == '"' )
+						*(end--) = 0;
 				}
 
 				protocol = atoi(Info_ValueForKey(info, "protocol"));
@@ -361,11 +370,11 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 		}
 
 		if (conf.stef == 1) {
-			strcpy(resp, "\xFF\xFF\xFF\xFFgetserversResponse");
+			strcpy(resp, "\xFF\xFF\xFF\xFFgetserversResponse ");
 		} else {
 			strcpy(resp, "\xFF\xFF\xFF\xFFgetserversResponse\n");
 		}
-		resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse") + 1;
+		resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n") - 1;
 		for (i = 0; i < MAX_SERVERS; i++) {
 			if (servers[i].state != STATE_ACTIVE || servers[i].protocol != protocol) {
 				continue;
@@ -385,7 +394,7 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 				sendto(sock, (const char *)resp, resplen, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 
 				numsrvsresp = 0;
-				resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse") + 1;
+				resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n") - 1;
 			}
 
 			resp[resplen++] = (byte)'\\';
@@ -495,18 +504,22 @@ void TimerEvent() {
 		conf.srcmasters[i].addr.sin_port = htons(conf.srcmasters[i].port);
 
 		for (j = 0; j < MAX_PROTOCOLS; j++) {
-			char req[64];
+			char req[64 + sizeof(conf.srcmasters[i].getserversKeywords)];
 
 			if (conf.srcmasters[i].protocols[j] == 0) {
 				continue;
 			}
 
 			println(MSG_DEBUG, "requesting servers from %s protocol %i...", conf.srcmasters[i].host, conf.srcmasters[i].protocols[j]);
-			if ( conf.stef ) {
+
+			if ( *conf.srcmasters[i].getserversKeywords ) { // Let the config set custom keywords
+				sprintf( req, "\xFF\xFF\xFF\xFFgetservers %i %s", conf.srcmasters[i].protocols[j], conf.srcmasters[i].getserversKeywords );
+			} else if ( conf.stef ) { // STEF defaults to "empty full"
 				sprintf(req, "\xFF\xFF\xFF\xFFgetservers %i empty full", conf.srcmasters[i].protocols[j]);
 			} else {
 				sprintf(req, "\xFF\xFF\xFF\xFFgetservers %i", conf.srcmasters[i].protocols[j]);
 			}
+
 			sendto(sock, req, (int)strlen(req), 0, (const struct sockaddr *)&conf.srcmasters[i].addr, sizeof(conf.srcmasters[i].addr));
 		}
 	}
