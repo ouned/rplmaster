@@ -102,6 +102,7 @@ typedef struct {
 	int backupfile;
 	int stef;
 	int q2;
+	int fallbackProtocol;
 	srcmaster_t srcmasters[MAX_SOURCE_MASTERS];
 } conf_t;
 

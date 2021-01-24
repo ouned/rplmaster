@@ -176,6 +176,8 @@ int ParseConfig(void *user, const char *section, const char *name, const char *v
 			cfg->stef = atoi(value);
 		} else if (!strcmp(name, "q2")) {
 			cfg->q2 = atoi(value);
+		} else if (!strcmp(name, "fallbackProtocol")) {
+			cfg->fallbackProtocol = atoi(value);
 		}
 	} else if (!strncmp(section, "SourceMaster", 12)) {
 		int srvNum = atoi(section + 12);
@@ -329,7 +331,10 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			for (i = 0; i < MAX_SERVERS; i++) {
 				if (servers[i].state != STATE_UNUSED && !addrcmp(&servers[i].addr, from)) {
 					int protocol = atoi(Info_ValueForKey(info, "protocol"));
-					if (protocol <= 0) {
+
+					if (protocol == 0 && conf.fallbackProtocol) {
+						protocol = conf.fallbackProtocol;
+					} else if (protocol <= 0) {
 						println(MSG_DEBUG, "invalid infoResponse from %s", addrstr(from));
 						return;
 					}
@@ -407,7 +412,10 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 				}
 
 				protocol = atoi(Info_ValueForKey(info, "protocol"));
-				if (protocol <= 0) {
+
+				if (protocol == 0 && conf.fallbackProtocol) {
+					protocol = conf.fallbackProtocol;
+				} else if (protocol <= 0) {
 					println(MSG_DEBUG, "invalid infoResponse from %s", addrstr(from));
 					return;
 				}
