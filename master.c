@@ -318,6 +318,72 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 		}
 
 		println(MSG_DEBUG, "parsed %i servers from %s", numServers, srcmaster->host);
+	} else if ( conf.q2 == 1 && !strncmp(cmd, "print\n", 6) ) {
+		char *info = data;
+		while ( *info && *info != '\\' )
+			info++;
+
+		if ( *info )
+		{
+			int i;
+			for (i = 0; i < MAX_SERVERS; i++) {
+				if (servers[i].state != STATE_UNUSED && !addrcmp(&servers[i].addr, from)) {
+					int protocol = atoi(Info_ValueForKey(info, "protocol"));
+					if (protocol <= 0) {
+						println(MSG_DEBUG, "invalid infoResponse from %s", addrstr(from));
+						return;
+					}
+
+					println(MSG_DEBUG, "received status response from %s", addrstr(from));
+
+					servers[i].state = STATE_ACTIVE;
+					servers[i].nextReq = time(0) + conf.request;
+					servers[i].disable = time(0) + conf.disable;
+					servers[i].timeout = time(0) + conf.timeout;
+					servers[i].protocol = protocol;
+					break;
+				}
+			}
+		}
+	} else if ( conf.q2 == 1 && !strcmp(cmd, "ping") ) {
+		srv_t *srv = NULL;
+		int i;
+
+		for (i = 0; i < MAX_SERVERS; i++) {
+			if (servers[i].state != STATE_UNUSED && !addrcmp(&servers[i].addr, from)) {
+				srv = &servers[i];
+				break;
+			}
+		}
+
+		println(MSG_DEBUG, "received ping from %s", addrstr(from));
+
+		if (!srv) {
+			int numip = NumServersIPAddr(from);
+
+			// maximum number of servers for this ip reached
+			if (numip >= conf.maxserversip) {
+				println(MSG_WARNING, "can not add server %s maximum per ip reached", addrstr(from));
+			}
+
+			for (i = 0; i < MAX_SERVERS; i++) {
+				if (servers[i].state == STATE_UNUSED) {
+					servers[i].state = STATE_DISABLED;
+					servers[i].protocol = 0;
+					servers[i].addr = *from;
+					servers[i].nextReq = 0; // instantly
+					servers[i].disable = time(0) + conf.disable;
+					servers[i].timeout = time(0) + conf.timeout;
+
+					srv = &servers[i];
+					break;
+				}
+			}
+		}
+
+		if (srv) {
+			srv->lastheartbeat = time(0);
+		}
 	} else if ( (conf.stef == 1 && !strcmp(cmd, "infoResponse")) ||
 	            (!strncmp(cmd, "infoResponse\n", sizeof("infoResponse\n") - 1)) ) {
 		int i;
@@ -543,7 +609,10 @@ void TimerEvent() {
 
 		if (servers[i].nextReq <= time(0)) {
 			println(MSG_DEBUG, "requesting info from %s...", addrstr(&servers[i].addr));
-			sendto(sock, "\xFF\xFF\xFF\xFFgetinfo", sizeof("\xFF\xFF\xFF\xFFgetinfo"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
+			if ( conf.q2 )
+				sendto(sock, "\xFF\xFF\xFF\xFFstatus", sizeof("\xFF\xFF\xFF\xFFstatus"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
+			else
+				sendto(sock, "\xFF\xFF\xFF\xFFgetinfo", sizeof("\xFF\xFF\xFF\xFFgetinfo"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
 			servers[i].nextReq = time(0) + conf.request;
 		}
 	}

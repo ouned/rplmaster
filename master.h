@@ -101,6 +101,7 @@ typedef struct {
 	int maxpacketsip;
 	int backupfile;
 	int stef;
+	int q2;
 	srcmaster_t srcmasters[MAX_SOURCE_MASTERS];
 } conf_t;
 
