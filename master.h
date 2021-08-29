@@ -78,6 +78,7 @@ typedef struct {
 	int protocols[MAX_PROTOCOLS];
 	int interval;
 	time_t nextReq;
+	char getserversKeywords[64];
 } srcmaster_t;
 
 typedef struct {
@@ -99,6 +100,9 @@ typedef struct {
 	int maxserversip;
 	int maxpacketsip;
 	int backupfile;
+	int stef;
+	int q2;
+	int fallbackProtocol;
 	srcmaster_t srcmasters[MAX_SOURCE_MASTERS];
 } conf_t;
 
