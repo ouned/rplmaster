@@ -1,13 +1,12 @@
 // -------------------------------------------------------------------------------
 // RPLMaster
-// Version: 1.2
+// Version: 1.3
 // Author: ouned
 // License: GPLv3
-// Website: https://jk2.ouned.de/master/
 // -------------------------------------------------------------------------------
 #include "master.h"
 
-SOCKET sock;
+SOCKET srvsock, querysock;
 struct sockaddr_in srvip;
 conf_t conf;
 srv_t servers[MAX_SERVERS];
@@ -25,12 +24,10 @@ int main(int argc, char *argv[]) {
 #ifdef WIN32
 	WSADATA wsaData;
 	int err;
-	int tv = RECV_TIMEOUT;
-#else
+#endif
 	struct timeval tv;
 	tv.tv_sec = 0;
 	tv.tv_usec = RECV_TIMEOUT * 1000;
-#endif
 
 	if (argc < 3) {
 		println(MSG_INFO, "Usage: "DEFAULT_EXE_NAME" <configfile> <backupfile>");
@@ -42,7 +39,6 @@ int main(int argc, char *argv[]) {
 	println(MSG_INFO, "-----------------------------------------");
 	println(MSG_INFO, "RPLMaster v"STR_VERSION"");
 	println(MSG_INFO, "Author: ouned");
-	println(MSG_INFO, "Website: https://jk2.ouned.de/master/");
 	println(MSG_INFO, "-----------------------------------------");
 
 	println(MSG_INFO, "parsing config file %s...", argv[1]);
@@ -60,17 +56,12 @@ int main(int argc, char *argv[]) {
 	}
 #endif
 
-	// prepare socket
-	println(MSG_DEBUG, "creating socket...");
-	sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (sock == INVALID_SOCKET) {
+	// prepare sockets
+	println(MSG_DEBUG, "creating sockets...");
+	srvsock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	querysock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (srvsock == INVALID_SOCKET || querysock == INVALID_SOCKET) {
 		println(MSG_ERROR, "socket creation failed.");
-		return 1;
-	}
-
-	// set timeout
-	if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof(tv)) != 0) {
-		println(MSG_ERROR, "setsockopt failed.");
 		return 1;
 	}
 
@@ -79,7 +70,7 @@ int main(int argc, char *argv[]) {
 	srvip.sin_family = AF_INET;
 	srvip.sin_addr.s_addr = htonl(INADDR_ANY);
 	srvip.sin_port = htons(conf.port);
-	if (bind(sock, (const struct sockaddr *)&srvip, sizeof(srvip)) != 0) {
+	if (bind(srvsock, (const struct sockaddr *)&srvip, sizeof(srvip)) != 0) {
 		println(MSG_ERROR, "binding socket to port %i failed. Already in use?", conf.port);
 		return 1;
 	}
@@ -99,39 +90,54 @@ int main(int argc, char *argv[]) {
 
 	while (1) {
 		byte data[MAX_RECVLEN + 1];
+		struct fd_set fds;
 		struct sockaddr_in from;
-		int len, i;
+		int len, il, ret_val;
 		socklen_t fromlen;
+		int i;
 
-		fromlen = sizeof(from);
-		len = recvfrom(sock, (char *)data, MAX_RECVLEN, 0, (struct sockaddr *)&from, &fromlen);
+		// prepare data for select call
+		FD_ZERO(&fds);
+		FD_SET(srvsock, &fds);
+		FD_SET(querysock, &fds);
 
-		// packets & firewall
-		if (len > 0) {
-			int found = 0;
+		ret_val = select(FD_SETSIZE, &fds, NULL, NULL, &tv);
+		if (ret_val > 0) {
+			for (SOCKET sock = srvsock, i = 0; i < 2; sock = querysock, i++) {
+				if (!FD_ISSET(sock, &fds))
+					continue;
 
-			for (i = 0; i < ipsecLen; i++) {
-				if (ipsec[i].ip.s_addr == from.sin_addr.s_addr) {
-					ipsec[i].numreq++;
+				fromlen = sizeof(from);
+				len = recvfrom(sock, (char *)data, MAX_RECVLEN, 0, (struct sockaddr *)&from, &fromlen);
 
-					if (ipsec[i].numreq <= conf.maxpacketsip) {
-						PacketReceived(data, len, &from);
-					} else {
-						println(MSG_DEBUG, "blocked packet from %s (maximum reached)", addrstr(&from));
+				// packets & firewall
+				if (len > 0) {
+					int found = 0;
+
+					for (i = 0; i < ipsecLen; i++) {
+						if (ipsec[i].ip.s_addr == from.sin_addr.s_addr) {
+							ipsec[i].numreq++;
+
+							if (ipsec[i].numreq <= conf.maxpacketsip) {
+								PacketReceived(sock, data, len, &from);
+							} else {
+								println(MSG_DEBUG, "blocked packet from %s (maximum reached)", addrstr(&from));
+							}
+
+							found = 1;
+							break;
+						}
 					}
 
-					found = 1;
-					break;
-				}
-			}
+					if (!found) {
+						if (ipsecLen < MAX_REQUEST_IPS_SECOND) {
+							ipsec[ipsecLen].ip = from.sin_addr;
+							ipsec[ipsecLen].numreq = 1;
+							ipsecLen++;
 
-			if (!found) {
-				if (ipsecLen < MAX_REQUEST_IPS_SECOND) {
-					ipsec[ipsecLen].ip = from.sin_addr;
-					ipsec[ipsecLen].numreq = 1;
-					ipsecLen++;
-
-					PacketReceived(data, len, &from);
+							PacketReceived(sock, data, len, &from);
+						}
+					}
 				}
 			}
 		}
@@ -144,7 +150,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	println(MSG_INFO, "shutting down...");
-	closesocket(sock);
+	closesocket(srvsock);
+	closesocket(querysock);
 #ifdef WIN32
 	WSACleanup();
 #endif
@@ -207,7 +214,7 @@ int ParseConfig(void *user, const char *section, const char *name, const char *v
 	return 1;
 }
 
-void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
+void PacketReceived(SOCKET socket, byte *data, int len, struct sockaddr_in *from) {
 	char cmd[64], arg1[64], arg2[64];
 
 	data[len] = 0;
@@ -226,6 +233,11 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 		int scanpos;
 		int i;
 		int numServers = 0;
+
+		if (socket == querysock) {
+			println(MSG_WARNING, "%s sent getserversResponse to the query socket", addrstr(from));
+			return;
+		}
 
 		for (i = 0; i < MAX_SOURCE_MASTERS; i++) {
 			if (conf.srcmasters[i].active && !addrcmp(&conf.srcmasters[i].addr, from)) {
@@ -321,6 +333,11 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 
 		println(MSG_DEBUG, "parsed %i servers from %s", numServers, srcmaster->host);
 	} else if ( conf.q2 == 1 && !strncmp(cmd, "print\n", 6) ) {
+		if (socket == srvsock) {
+			println(MSG_WARNING, "%s sent infoResponse to the server socket", addrstr(from));
+			return;
+		}
+
 		char *info = data;
 		while ( *info && *info != '\\' )
 			info++;
@@ -351,6 +368,11 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			}
 		}
 	} else if ( conf.q2 == 1 && !strcmp(cmd, "ping") ) {
+		if (socket == querysock) {
+			println(MSG_WARNING, "%s sent ping to the query socket", addrstr(from));
+			return;
+		}
+
 		srv_t *srv = NULL;
 		int i;
 
@@ -392,6 +414,11 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 	} else if ( (conf.stef == 1 && !strcmp(cmd, "infoResponse")) ||
 	            (!strncmp(cmd, "infoResponse\n", sizeof("infoResponse\n") - 1)) ) {
 		int i;
+
+		if (socket == srvsock) {
+			println(MSG_WARNING, "%s sent infoResponse to the server socket", addrstr(from));
+			return;
+		}
 
 		for (i = 0; i < MAX_SERVERS; i++) {
 			if (servers[i].state != STATE_UNUSED && !addrcmp(&servers[i].addr, from)) {
@@ -437,6 +464,11 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 		int protocol;
 		int i, numsrvsresp = 0, numsrvs = 0;
 
+		if (socket == querysock) {
+			println(MSG_WARNING, "%s sent getservers request to the query socket", addrstr(from));
+			return;
+		}
+
 		protocol = atoi(arg1);
 		if (protocol <= 0) {
 			println(MSG_DEBUG, "invalid getservers request from %s", addrstr(from));
@@ -465,7 +497,7 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 				resp[resplen++] = 'E'; resp[resplen++] = 'O';
 				if (conf.stef) resp[resplen++] = 'F';
 				else resp[resplen++] = 'T';
-				sendto(sock, (const char *)resp, resplen, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
+				sendto(srvsock, (const char *)resp, resplen, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 
 				numsrvsresp = 0;
 				resplen = sizeof("\xFF\xFF\xFF\xFFgetserversResponse\n") - 1;
@@ -490,10 +522,15 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 
 		stat_reqs++;
 		println(MSG_DEBUG, "%s requested servers for protocol %i (%i servers sent)", addrstr(from), protocol, numsrvs);
-		sendto(sock, (const char *)resp, resplen, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
+		sendto(srvsock, (const char *)resp, resplen, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 	} else if (!strcmp(cmd, "heartbeat")) {
 		srv_t *srv = NULL;
 		int i;
+
+		if (socket == querysock) {
+			println(MSG_WARNING, "%s sent heartbeat to the query socket", addrstr(from));
+			return;
+		}
 
 		for (i = 0; i < MAX_SERVERS; i++) {
 			if (servers[i].state != STATE_UNUSED && !addrcmp(&servers[i].addr, from)) {
@@ -531,19 +568,29 @@ void PacketReceived(byte *data, int len, struct sockaddr_in *from) {
 			srv->lastheartbeat = time(0);
 		}
 	} else if (!strcmp(cmd, "master")) {
+		if (socket == querysock) {
+			println(MSG_WARNING, "%s sent master info request to the query socket", addrstr(from));
+			return;
+		}
+
 		println(MSG_DEBUG, "%s requested master information", addrstr(from));
-		sendto(sock, STR_MASTER_INFO, sizeof(STR_MASTER_INFO), 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
+		sendto(srvsock, STR_MASTER_INFO, sizeof(STR_MASTER_INFO), 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 	} else if (!strcmp(cmd, "stats")) {
+		if (socket == querysock) {
+			println(MSG_WARNING, "%s sent stats info request to the query socket", addrstr(from));
+			return;
+		}
+
 		if (!strcmp(arg1, "version")) {
-			sendto(sock, STR_VERSION, sizeof(STR_VERSION), 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
+			sendto(srvsock, STR_VERSION, sizeof(STR_VERSION), 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 		} else if (!strcmp(arg1, "startup")) {
 			char resp[16];
 			sprintf(resp, "%llu", (uint64_t)stat_startup);
-			sendto(sock, resp, (int)strlen(resp) + 1, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
+			sendto(srvsock, resp, (int)strlen(resp) + 1, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 		} else if (!strcmp(arg1, "reqs")) {
 			char resp[16];
 			sprintf(resp, "%llu", (uint64_t)stat_reqs);
-			sendto(sock, resp, (int)strlen(resp) + 1, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
+			sendto(srvsock, resp, (int)strlen(resp) + 1, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 		}
 	} else {
 		println(MSG_DEBUG, "unknown packet received from %s", addrstr(from));
@@ -594,7 +641,7 @@ void TimerEvent() {
 				sprintf(req, "\xFF\xFF\xFF\xFFgetservers %i", conf.srcmasters[i].protocols[j]);
 			}
 
-			sendto(sock, req, (int)strlen(req), 0, (const struct sockaddr *)&conf.srcmasters[i].addr, sizeof(conf.srcmasters[i].addr));
+			sendto(srvsock, req, (int)strlen(req), 0, (const struct sockaddr *)&conf.srcmasters[i].addr, sizeof(conf.srcmasters[i].addr));
 		}
 	}
 
@@ -618,9 +665,9 @@ void TimerEvent() {
 		if (servers[i].nextReq <= time(0)) {
 			println(MSG_DEBUG, "requesting info from %s...", addrstr(&servers[i].addr));
 			if ( conf.q2 )
-				sendto(sock, "\xFF\xFF\xFF\xFFstatus", sizeof("\xFF\xFF\xFF\xFFstatus"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
+				sendto(querysock, "\xFF\xFF\xFF\xFFstatus", sizeof("\xFF\xFF\xFF\xFFstatus"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
 			else
-				sendto(sock, "\xFF\xFF\xFF\xFFgetinfo", sizeof("\xFF\xFF\xFF\xFFgetinfo"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
+				sendto(querysock, "\xFF\xFF\xFF\xFFgetinfo", sizeof("\xFF\xFF\xFF\xFFgetinfo"), 0, (const struct sockaddr *)&servers[i].addr, sizeof(servers[i].addr));
 			servers[i].nextReq = time(0) + conf.request;
 		}
 	}

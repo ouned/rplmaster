@@ -1,9 +1,8 @@
 // -------------------------------------------------------------------------------
 // RPLMaster
-// Version: 1.2
+// Version: 1.3
 // Author: ouned
 // License: GPLv3
-// Website: https://jk2.ouned.de/master/
 // -------------------------------------------------------------------------------
 #include <stdio.h>
 #include <stdarg.h>
@@ -29,7 +28,7 @@
 #endif
 
 // ---------------------------------------------------- SETTINGS ----------------------------------------------------
-#define STR_VERSION "1.2"
+#define STR_VERSION "1.3"
 
 #define RECV_TIMEOUT 500										// should not be changed
 #define TIMER_LOOP 1											// should not be changed
@@ -111,7 +110,7 @@ typedef struct {
 	int numreq;
 } reqip_t;
 
-void PacketReceived(byte *data, int len, struct sockaddr_in *from);
+void PacketReceived(SOCKET socket, byte *data, int len, struct sockaddr_in *from);
 int ParseConfig(void *user, const char *section, const char *name, const char *value);
 void TimerEvent();
 char *Info_ValueForKey(const char *s, const char *key);
