@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <time.h>
 #include <math.h>
 #include "lib/ini.h"

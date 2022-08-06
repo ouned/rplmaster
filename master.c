@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
 
 	while (1) {
 		byte data[MAX_RECVLEN + 1];
-		struct fd_set fds;
+		fd_set fds;
 		struct sockaddr_in from;
 		int len, ret_val;
 		socklen_t fromlen;
@@ -586,11 +586,11 @@ void PacketReceived(SOCKET socket, byte *data, int len, struct sockaddr_in *from
 			sendto(srvsock, STR_VERSION, sizeof(STR_VERSION), 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 		} else if (!strcmp(arg1, "startup")) {
 			char resp[16];
-			sprintf(resp, "%llu", (uint64_t)stat_startup);
+			sprintf(resp, "%"PRIu64, (uint64_t)stat_startup);
 			sendto(srvsock, resp, (int)strlen(resp) + 1, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 		} else if (!strcmp(arg1, "reqs")) {
 			char resp[16];
-			sprintf(resp, "%llu", (uint64_t)stat_reqs);
+			sprintf(resp, "%"PRIu64, (uint64_t)stat_reqs);
 			sendto(srvsock, resp, (int)strlen(resp) + 1, 0, (const struct sockaddr *)from, sizeof(struct sockaddr_in));
 		}
 	} else {
