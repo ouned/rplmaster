@@ -1,10 +1,9 @@
----------------------------------------------
 RPLMaster
----------------------------------------------
+---------
 Author: ouned  
 Version: 1.5
 
-Description:
+### Description
 This is a masterserver for the quake3 protocol with advanced features:
 - copy IP's from other masterservers
 - maximum servers per IP
@@ -17,12 +16,14 @@ This is a masterserver for the quake3 protocol with advanced features:
     - "ÿÿÿÿstats reqs":    returns number of requests ("ÿÿÿÿgetservers...") since startup
     - "ÿÿÿÿgetservers 16 heartbeaters": only returns servers which heartbeat the master directly (are not copied from another master)
 
-Installation:
+Example servers for JK2 and JKA are running @ master.jk2mv.org
+
+### Installation
 Run the rplmaster executable for your platform including the name of your configuration file and the name for your backup file.
 e.g. rplmaster.exe jk2.cfg jk2.bak
 See the configuration file for more details.
 
-Changelog:
+### Changelog
 1.5:
 - use extra socket (port) for querying servers
 
@@ -33,9 +34,6 @@ Changelog:
 - supports dpmaster as a sourcemaster
 - stats requests
 
-License:  
+### License
 GPLv3 (http://www.gnu.org/licenses/gpl.html)  
 Sourcecode can be found in the "src" directory
-
-
-Example servers for JK2 and JKA are running @ master.jk2mv.org
