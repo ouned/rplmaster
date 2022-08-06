@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------------------
 // RPLMaster
-// Version: 1.3
+// Version: 1.5
 // Author: ouned
 // License: GPLv3
 // -------------------------------------------------------------------------------
@@ -28,7 +28,7 @@
 #endif
 
 // ---------------------------------------------------- SETTINGS ----------------------------------------------------
-#define STR_VERSION "1.3"
+#define STR_VERSION "1.5"
 
 #define RECV_TIMEOUT 500										// should not be changed
 #define TIMER_LOOP 1											// should not be changed

@@ -1,9 +1,8 @@
 ---------------------------------------------
 RPLMaster
 ---------------------------------------------
-
 Author: ouned  
-Version: 1.2
+Version: 1.5
 
 Description:
 This is a masterserver for the quake3 protocol with advanced features:
@@ -23,7 +22,10 @@ Run the rplmaster executable for your platform including the name of your config
 e.g. rplmaster.exe jk2.cfg jk2.bak
 See the configuration file for more details.
 
-Changelog:  
+Changelog:
+1.5:
+- use extra socket (port) for querying servers
+
 1.2:
 - increased max source masters from 10 to 16
 - sends 256 servers at max in a single packet

@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------------------
 // RPLMaster
-// Version: 1.3
+// Version: 1.5
 // Author: ouned
 // License: GPLv3
 // -------------------------------------------------------------------------------
@@ -26,8 +26,6 @@ int main(int argc, char *argv[]) {
 	int err;
 #endif
 	struct timeval tv;
-	tv.tv_sec = 0;
-	tv.tv_usec = RECV_TIMEOUT * 1000;
 
 	if (argc < 3) {
 		println(MSG_INFO, "Usage: "DEFAULT_EXE_NAME" <configfile> <backupfile>");
@@ -88,13 +86,16 @@ int main(int argc, char *argv[]) {
 	println(MSG_INFO, "master is now ready and running on port %i", conf.port);
 	TimerEvent();
 
+	// timeout
+	tv.tv_sec = 0;
+	tv.tv_usec = RECV_TIMEOUT * 1000;
+
 	while (1) {
 		byte data[MAX_RECVLEN + 1];
 		struct fd_set fds;
 		struct sockaddr_in from;
-		int len, il, ret_val;
+		int len, ret_val;
 		socklen_t fromlen;
-		int i;
 
 		// prepare data for select call
 		FD_ZERO(&fds);

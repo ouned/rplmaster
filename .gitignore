@@ -93,4 +93,5 @@ GRTAGS
 GPATH
 
 # ignore all subdirectories of the build directory
+/build/*
 /build/*/*
