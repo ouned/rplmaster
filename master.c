@@ -86,10 +86,6 @@ int main(int argc, char *argv[]) {
 	println(MSG_INFO, "master is now ready and running on port %i", conf.port);
 	TimerEvent();
 
-	// timeout
-	tv.tv_sec = 0;
-	tv.tv_usec = RECV_TIMEOUT * 1000;
-
 	while (1) {
 		byte data[MAX_RECVLEN + 1];
 		fd_set fds;
@@ -101,6 +97,10 @@ int main(int argc, char *argv[]) {
 		FD_ZERO(&fds);
 		FD_SET(srvsock, &fds);
 		FD_SET(querysock, &fds);
+
+		// timeout
+		tv.tv_sec = 0;
+		tv.tv_usec = RECV_TIMEOUT * 1000;
 
 		ret_val = select(FD_SETSIZE, &fds, NULL, NULL, &tv);
 		if (ret_val > 0) {
@@ -634,7 +634,7 @@ void TimerEvent() {
 
 			println(MSG_DEBUG, "requesting servers from %s protocol %i...", conf.srcmasters[i].host, conf.srcmasters[i].protocols[j]);
 
-			if ( *conf.srcmasters[i].getserversKeywords ) { // Let the config set custom keywords
+			if ( conf.stef && *conf.srcmasters[i].getserversKeywords ) { // Let the config set custom keywords
 				sprintf( req, "\xFF\xFF\xFF\xFFgetservers %i %s", conf.srcmasters[i].protocols[j], conf.srcmasters[i].getserversKeywords );
 			} else if ( conf.stef ) { // STEF defaults to "empty full"
 				sprintf(req, "\xFF\xFF\xFF\xFFgetservers %i empty full", conf.srcmasters[i].protocols[j]);
