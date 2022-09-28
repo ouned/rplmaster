@@ -198,8 +198,9 @@ int ParseConfig(void *user, const char *section, const char *name, const char *v
 			cfg->srcmasters[srvNum].port = atoi(value);
 		} else if (!strcmp(name, "protocols")) {
 			int num = 0;
-			char *t = strtok((char *)value, ",");
+			char *t;
 
+            strtok((char *)value, ",");
 			while ((t = strtok(NULL, ",")) != NULL) {
 				cfg->srcmasters[srvNum].protocols[num] = atoi(t);
 				num++;
@@ -674,7 +675,7 @@ void TimerEvent() {
 	}
 
 	// reset firewall
-	memset(ipsec, 0, sizeof(sizeof(ipsec)));
+	memset(ipsec, 0, sizeof(ipsec));
 	ipsecLen = 0;
 
 	// backup file
